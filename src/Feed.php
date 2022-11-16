@@ -88,6 +88,11 @@ class Feed
 			} elseif (isset($item->pubDate)) {
 				$item->timestamp = strtotime($item->pubDate);
 			}
+			
+			// check for markdown
+			if (isset($item->{'source:markdown'})) {
+				$item->markdown = $item->{'source:markdown'};
+			}
 		}
 		$feed = new self;
 		$feed->xml = $xml->channel;
