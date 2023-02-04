@@ -5,18 +5,17 @@
  *
  * @copyright  Copyright (c) 2008 David Grudl
  * @license    New BSD License
- * @version    1.5
+ * @version    1.2
  */
+
 class Feed
 {
+  
 	/** @var int */
 	public static $cacheExpire = '1 day';
 
 	/** @var string */
 	public static $cacheDir;
-
-	/** @var string */
-	public static $userAgent = 'FeedFetcher-Google';
 
 	/** @var SimpleXMLElement */
 	protected $xml;
@@ -30,7 +29,7 @@ class Feed
 	 * @return Feed
 	 * @throws FeedException
 	 */
-	public static function load($url, $user = null, $pass = null)
+	public static function load($url, $user = NULL, $pass = NULL)
 	{
 		$xml = self::loadXml($url, $user, $pass);
 		if ($xml->channel) {
@@ -49,7 +48,7 @@ class Feed
 	 * @return Feed
 	 * @throws FeedException
 	 */
-	public static function loadRss($url, $user = null, $pass = null)
+	public static function loadRss($url, $user = NULL, $pass = NULL)
 	{
 		return self::fromRss(self::loadXml($url, $user, $pass));
 	}
@@ -63,26 +62,50 @@ class Feed
 	 * @return Feed
 	 * @throws FeedException
 	 */
-	public static function loadAtom($url, $user = null, $pass = null)
+	public static function loadAtom($url, $user = NULL, $pass = NULL)
 	{
+	  ini_set('user_agent', 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:9.0) Gecko/20100101 Firefox/9.0');
 		return self::fromAtom(self::loadXml($url, $user, $pass));
 	}
 
 
-	private static function fromRss(SimpleXMLElement $xml)
+	public static function fromRss(SimpleXMLElement $xml)
 	{
 		if (!$xml->channel) {
 			throw new FeedException('Invalid feed.');
 		}
 
 		self::adjustNamespaces($xml);
+		
+		$channel = $xml->channel;
+		
+		self::adjustNamespaces($channel);
+			
+		if (isset($channel->{'now:title'})) {
+			$channel->nowTitle = (string)$channel->{'now:title'};
+		}
+			
+		if (isset($channel->{'now:link'})) {
+			$channel->nowLink = (string)$channel->{'now:link'};
+		}
+		
+		if (isset($channel->{'now:content'})) {
+			$channel->nowContent = (string)$channel->{'now:content'};
+		}
+			
+		if (isset($channel->{'now:markdown'})) {
+			$channel->nowMarkdown = (string)$channel->{'now:markdown'};
+		}
+			
+		if (isset($channel->{'now:timestamp'})) {
+			$channel->nowTimestamp = (string)$channel->{'now:timestamp'};
+		}
 
 		foreach ($xml->channel->item as $item) {
 			// converts namespaces to dotted tags
 			self::adjustNamespaces($item);
-
-			// generate 'url' & 'timestamp' tags
-			$item->url = (string) $item->link;
+			
+			// generate 'timestamp' tag
 			if (isset($item->{'dc:date'})) {
 				$item->timestamp = strtotime($item->{'dc:date'});
 			} elseif (isset($item->pubDate)) {
@@ -100,19 +123,19 @@ class Feed
 	}
 
 
-	private static function fromAtom(SimpleXMLElement $xml)
+	public static function fromAtom(SimpleXMLElement $xml)
 	{
-		if (!in_array('http://www.w3.org/2005/Atom', $xml->getDocNamespaces(), true)
-			&& !in_array('http://purl.org/atom/ns#', $xml->getDocNamespaces(), true)
+		if (!in_array('http://www.w3.org/2005/Atom', $xml->getDocNamespaces(), TRUE)
+			&& !in_array('http://purl.org/atom/ns#', $xml->getDocNamespaces(), TRUE)
 		) {
 			throw new FeedException('Invalid feed.');
 		}
 
-		// generate 'url' & 'timestamp' tags
+		// generate 'timestamp' tag
 		foreach ($xml->entry as $entry) {
-			$entry->url = (string) $entry->link['href'];
 			$entry->timestamp = strtotime($entry->updated);
 		}
+		
 		$feed = new self;
 		$feed->xml = $xml;
 		return $feed;
@@ -147,9 +170,9 @@ class Feed
 	 * @param  SimpleXMLElement
 	 * @return array
 	 */
-	public function toArray(SimpleXMLElement $xml = null)
+	public function toArray(SimpleXMLElement $xml = NULL)
 	{
-		if ($xml === null) {
+		if ($xml === NULL) {
 			$xml = $this->xml;
 		}
 
@@ -157,7 +180,7 @@ class Feed
 			return (string) $xml;
 		}
 
-		$arr = [];
+		$arr = array();
 		foreach ($xml->children() as $tag => $child) {
 			if (count($xml->$tag) === 1) {
 				$arr[$tag] = $this->toArray($child);
@@ -198,7 +221,7 @@ class Feed
 			throw new FeedException('Cannot load feed.');
 		}
 
-		return new SimpleXMLElement($data, LIBXML_NOWARNING | LIBXML_NOERROR | LIBXML_NOCDATA);
+		return new SimpleXMLElement($data, LIBXML_NOWARNING | LIBXML_NOERROR);
 	}
 
 
@@ -207,44 +230,39 @@ class Feed
 	 * @param  string
 	 * @param  string
 	 * @param  string
-	 * @return string|false
+	 * @return string|FALSE
 	 * @throws FeedException
 	 */
 	private static function httpRequest($url, $user, $pass)
 	{
 		if (extension_loaded('curl')) {
 			$curl = curl_init();
+			curl_setopt($curl, CURLOPT_TCP_FASTOPEN, TRUE);
 			curl_setopt($curl, CURLOPT_URL, $url);
-			if ($user !== null || $pass !== null) {
+			curl_setopt($curl,CURLOPT_USERAGENT,"Mozilla/5.0 (Windows NT 6.1; WOW64; rv:9.0) Gecko/20100101 Firefox/9.0");
+			curl_setopt($curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4 );
+			curl_setopt($curl, CURLOPT_ENCODING,  '');
+			if ($user !== NULL || $pass !== NULL) {
 				curl_setopt($curl, CURLOPT_USERPWD, "$user:$pass");
 			}
-			curl_setopt($curl, CURLOPT_USERAGENT, self::$userAgent); // some feeds require a user agent
-			curl_setopt($curl, CURLOPT_HEADER, false);
+			curl_setopt($curl, CURLOPT_HEADER, FALSE);
+			curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 10);
 			curl_setopt($curl, CURLOPT_TIMEOUT, 20);
-			curl_setopt($curl, CURLOPT_ENCODING, '');
-			curl_setopt($curl, CURLOPT_RETURNTRANSFER, true); // no echo, just return result
-			curl_setopt($curl, CURLOPT_USERAGENT, '');
+			curl_setopt($curl, CURLOPT_RETURNTRANSFER, TRUE); // no echo, just return result
+			curl_setopt($curl, CURLOPT_FILETIME, true);
 			if (!ini_get('open_basedir')) {
-				curl_setopt($curl, CURLOPT_FOLLOWLOCATION, true); // sometime is useful :)
+				curl_setopt($curl, CURLOPT_FOLLOWLOCATION, TRUE); // sometime is useful :)
 			}
 			$result = curl_exec($curl);
 			return curl_errno($curl) === 0 && curl_getinfo($curl, CURLINFO_HTTP_CODE) === 200
 				? $result
-				: false;
+				: FALSE;
+
+		} elseif ($user === NULL && $pass === NULL) {
+			return file_get_contents($url);
 
 		} else {
-			$context = null;
-			if ($user !== null && $pass !== null) {
-				$options = [
-					'http' => [
-						'method' => 'GET',
-						'header' => 'Authorization: Basic ' . base64_encode($user . ':' . $pass) . "\r\n",
-					],
-				];
-				$context = stream_context_create($options);
-			}
-
-			return file_get_contents($url, false, $context);
+			throw new FeedException('PHP extension CURL is not loaded.');
 		}
 	}
 
@@ -256,10 +274,7 @@ class Feed
 	 */
 	private static function adjustNamespaces($el)
 	{
-		foreach ($el->getNamespaces(true) as $prefix => $ns) {
-			if ($prefix === '') {
-				continue;
-			}
+		foreach ($el->getNamespaces(TRUE) as $prefix => $ns) {
 			$children = $el->children($ns);
 			foreach ($children as $tag => $content) {
 				$el->{$prefix . ':' . $tag} = $content;
@@ -267,7 +282,6 @@ class Feed
 		}
 	}
 }
-
 
 
 /**
