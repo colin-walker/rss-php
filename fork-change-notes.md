@@ -30,3 +30,6 @@ $nowMarkdown = addslashes($rss->nowMarkdown);
 $nowTimestamp = $rss->nowTimestamp;
 ```
 
+- added support for JSONfeed
+
+Integrated the code from [AnTheMaker's PR](https://github.com/dg/rss-php/pull/21) to the original repo.

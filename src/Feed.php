@@ -16,6 +16,12 @@ class Feed
 
 	/** @var string */
 	public static $cacheDir;
+	
+	/** @var array */
+	public static $supportedJsonfeedVersions = [
+		'https://jsonfeed.org/version/1',
+		'https://jsonfeed.org/version/1.1'
+	];
 
 	/** @var SimpleXMLElement */
 	protected $xml;
@@ -50,6 +56,7 @@ class Feed
 	 */
 	public static function loadRss($url, $user = NULL, $pass = NULL)
 	{
+	    ini_set('user_agent', 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:9.0) Gecko/20100101 Firefox/9.0');
 		return self::fromRss(self::loadXml($url, $user, $pass));
 	}
 
@@ -69,6 +76,20 @@ class Feed
 	}
 
 
+	/**
+	 * Loads JSON feed.
+	 * @param  string  JSON feed URL
+	 * @param  string  optional user name
+	 * @param  string  optional password
+	 * @return Feed
+	 * @throws FeedException
+	 */
+	public static function loadJsonfeed($url, $user = null, $pass = null)
+	{
+		return self::fromJson(self::loadJson($url, $user, $pass));
+	}
+
+
 	public static function fromRss(SimpleXMLElement $xml)
 	{
 		if (!$xml->channel) {
@@ -77,29 +98,32 @@ class Feed
 
 		self::adjustNamespaces($xml);
 		
-		$channel = $xml->channel;
+		//foreach ($xml->channel as $channel) {
+		//if ($xml->channel) {
+		    $channel = $xml->channel;
 		
-		self::adjustNamespaces($channel);
+			self::adjustNamespaces($channel);
 			
-		if (isset($channel->{'now:title'})) {
-			$channel->nowTitle = (string)$channel->{'now:title'};
-		}
+			if (isset($channel->{'now:title'})) {
+				$channel->nowTitle = (string)$channel->{'now:title'};
+			}
 			
-		if (isset($channel->{'now:link'})) {
-			$channel->nowLink = (string)$channel->{'now:link'};
-		}
-		
-		if (isset($channel->{'now:content'})) {
-			$channel->nowContent = (string)$channel->{'now:content'};
-		}
+			if (isset($channel->{'now:link'})) {
+				$channel->nowLink = (string)$channel->{'now:link'};
+			}
 			
-		if (isset($channel->{'now:markdown'})) {
-			$channel->nowMarkdown = (string)$channel->{'now:markdown'};
-		}
+			if (isset($channel->{'now:content'})) {
+				$channel->nowContent = (string)$channel->{'now:content'};
+			}
 			
-		if (isset($channel->{'now:timestamp'})) {
-			$channel->nowTimestamp = (string)$channel->{'now:timestamp'};
-		}
+			if (isset($channel->{'now:markdown'})) {
+				$channel->nowMarkdown = (string)$channel->{'now:markdown'};
+			}
+			
+			if (isset($channel->{'now:timestamp'})) {
+				$channel->nowTimestamp = (string)$channel->{'now:timestamp'};
+			}
+		//}
 
 		foreach ($xml->channel->item as $item) {
 			// converts namespaces to dotted tags
@@ -138,6 +162,32 @@ class Feed
 		
 		$feed = new self;
 		$feed->xml = $xml;
+		return $feed;
+	}
+
+
+	public static function fromJson(object $json)
+	{
+		if (!in_array($json->version, self::$supportedJsonfeedVersions, true)) {
+			throw new FeedException('Invalid feed.');
+		}
+
+		// generate 'url' & 'timestamp' tags
+		foreach ($json->items as $item) {
+			$item->timestamp = strtotime($item->date_published);
+
+			if (empty($item->content_text)) {
+				$item->summary = (string) strip_tags($item->content_html);
+			}
+			if (empty($item->content_html)) {
+				$item->summary = (string) strip_tags($item->content_text);
+			}
+			if (empty($item->summary)) {
+				$item->summary = (string) $item->content_text;
+			}
+		}
+		$feed = new self;
+		$feed->xml = $json;
 		return $feed;
 	}
 
@@ -203,6 +253,7 @@ class Feed
 	 */
 	private static function loadXml($url, $user, $pass)
 	{
+		//ini_set('user_agent', 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:9.0) Gecko/20100101 Firefox/9.0');
 		$e = self::$cacheExpire;
 		$cacheFile = self::$cacheDir . '/feed.' . md5(serialize(func_get_args())) . '.xml';
 
@@ -226,6 +277,43 @@ class Feed
 
 
 	/**
+	 * Load JSON from cache or HTTP.
+	 * @param  string
+	 * @param  string
+	 * @param  string
+	 * @return object
+	 * @throws FeedException
+	 */
+	private static function loadJson($url, $user, $pass)
+	{
+		$e = self::$cacheExpire;
+		$cacheFile = self::$cacheDir . '/feed.' . md5(serialize(func_get_args())) . '.xml';
+
+		if (self::$cacheDir
+			&& (time() - @filemtime($cacheFile) <= (is_string($e) ? strtotime($e) - time() : $e))
+			&& $data = @file_get_contents($cacheFile)
+		) {
+			// ok
+		} elseif ($data = trim(self::httpRequest($url, $user, $pass))) {
+			if (self::$cacheDir) {
+				file_put_contents($cacheFile, $data);
+			}
+		} elseif (self::$cacheDir && $data = @file_get_contents($cacheFile)) {
+			// ok
+		} else {
+			throw new FeedException('Cannot load feed.');
+		}
+
+		$json = json_decode($data);
+		if(!$json){
+			throw new FeedException('Cannot parse feed.');
+		}
+
+		return $json;
+	}
+
+
+	/**
 	 * Process HTTP request.
 	 * @param  string
 	 * @param  string
@@ -236,9 +324,37 @@ class Feed
 	private static function httpRequest($url, $user, $pass)
 	{
 		if (extension_loaded('curl')) {
+			
+			$options = array(
+				CURLOPT_TCP_FASTOPEN => TRUE,
+				CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:9.0) Gecko/20100101 Firefox/9.0',
+				CURLOPT_ENCODING => '',
+				CURLOPT_HEADER => FALSE,
+				CURLOPT_CONNECTTIMEOUT => 10,
+				CURLOPT_TIMEOUT => 20,
+				CURLOPT_RETURNTRANSFER => TRUE,
+				CURLOPT_FOLLOWLOCATION => TRUE, 
+			);
+			
+			$port = parse_url($url, PHP_URL_PORT);
+			if (!empty($port)) {
+				$scheme = parse_url($url, PHP_URL_SCHEME);
+				$host = parse_url($url, PHP_URL_HOST);
+				$path = parse_url($url, PHP_URL_PATH);
+				$url = $scheme.'://'.$host.$path;
+				array_push($options,'CURLOPT_PORT => ' .$port);
+			}
 			$curl = curl_init();
+			curl_setopt($curl, CURLOPT_URL, $url);
+			curl_setopt_array($curl, $options);
+			
+			
+			/*
 			curl_setopt($curl, CURLOPT_TCP_FASTOPEN, TRUE);
 			curl_setopt($curl, CURLOPT_URL, $url);
+			if (!empty($port)) {
+				curl_setopt($curl, CURLOPT_PORT, $port);
+			}
 			curl_setopt($curl,CURLOPT_USERAGENT,"Mozilla/5.0 (Windows NT 6.1; WOW64; rv:9.0) Gecko/20100101 Firefox/9.0");
 			curl_setopt($curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4 );
 			curl_setopt($curl, CURLOPT_ENCODING,  '');
@@ -253,6 +369,8 @@ class Feed
 			if (!ini_get('open_basedir')) {
 				curl_setopt($curl, CURLOPT_FOLLOWLOCATION, TRUE); // sometime is useful :)
 			}
+			*/
+			
 			$result = curl_exec($curl);
 			return curl_errno($curl) === 0 && curl_getinfo($curl, CURLINFO_HTTP_CODE) === 200
 				? $result
@@ -281,7 +399,9 @@ class Feed
 			}
 		}
 	}
+
 }
+
 
 
 /**
